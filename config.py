@@ -42,5 +42,18 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs):
+        pass
+
+    # Clean empty strings from env vars so defaults are used
+    from pydantic import model_validator
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_empty_strings(cls, data):
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if v != ""}
+        return data
+
 
 settings = Settings()
