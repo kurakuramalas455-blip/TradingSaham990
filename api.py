@@ -256,12 +256,8 @@ const mosColor = v => v > 20 ? '#4ade80' : v > 0 ? '#fb923c' : '#f87171';
 
 // Load watchlist on startup
 (async () => {
-  try {
-    const data = await fetch('/api/watchlist').then(r=>r.json());
-    savedWatchlist = data;
     renderWatchlistChips();
     updateWatchlistBadge();
-  } catch(_) {}
 })();
 
 function setSpinner(on, text = 'Memindai...') {
@@ -274,7 +270,7 @@ async function scanAll(type) {
   document.getElementById('detail-panel').style.display = 'none';
   document.getElementById('gems-info').style.display = 'none';
   try {
-    const res = await fetch(`/api/scan-all?type=${type}`);
+    const res = await fetch(`/api/scan-all?type=${type}&cash=${getLocalCash()}`);
     if (!res.ok) throw new Error('Gagal memuat data');
     allResults = await res.json();
     renderAll(allResults);
@@ -294,7 +290,7 @@ async function scanOne() {
   if (!t) return alert('Masukkan kode saham!');
   setSpinner(true, `Menganalisa ${t.toUpperCase()}...`);
   try {
-    const res = await fetch(`/api/scan?ticker=${t}`);
+    const res = await fetch(`/api/scan?ticker=${t}&cash=${getLocalCash()}`);
     if (!res.ok) throw new Error((await res.json()).detail);
     const data = await res.json();
     allResults = [data];
@@ -304,22 +300,22 @@ async function scanOne() {
   finally { setSpinner(false); }
 }
 
+async function updateCashUI() {
+  const el = document.getElementById('cash-badge');
+  if (el) el.textContent = 'Cash: Rp ' + fmt(getLocalCash());
+}
+
 async function loadPortfolio() {
-  const data = await fetch('/api/portfolio').then(r=>r.json());
+  const cash = getLocalCash();
   const panel = document.getElementById('detail-panel');
   panel.style.display = 'block';
-  const holdings = Object.entries(data.holdings || {}).map(([k,v]) =>
-    `<div class="di"><div class="dk">${k}</div><div class="dv">${v.lots} lots @ Rp ${fmt(v.avg_price)}</div></div>`
-  ).join('') || '<p style="color:var(--sub);font-size:.85rem">Belum ada posisi aktif.</p>';
   document.getElementById('detail-content').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
       <h3>Portfolio Virtual</h3>
     </div>
     <div class="detail-grid">
-      <div class="di"><div class="dk">Kas Tersedia</div><div class="dv" style="color:#a78bfa">Rp ${fmtB(data.cash_balance_idr)}</div></div>
-      <div class="di"><div class="dk">Total Order Eksekusi</div><div class="dv">${data.total_orders_executed}</div></div>
-    </div>
-    <div class="detail-grid">${holdings}</div>`;
+      <div class="di"><div class="dk">Kas Tersedia</div><div class="dv" style="color:#a78bfa">Rp ${fmtB(cash)}</div></div>
+    </div>`;
   document.getElementById('price-chart-info').style.display = 'none';
 }
 
@@ -616,13 +612,10 @@ async function showDetailDirect(r) {
 }
 
 async function loadPortfolio() {
-  const data = await fetch('/api/portfolio').then(r=>r.json());
+  const cash = getLocalCash();
   const panel = document.getElementById('detail-panel');
   panel.style.display = 'block';
   document.getElementById('price-chart-info').style.display = 'none';
-  const holdings = Object.entries(data.holdings || {}).map(([k,v]) =>
-    `<div class="di"><div class="dk">${k}</div><div class="dv">${v.lots} lots @ Rp ${fmt(v.avg_price)}</div></div>`
-  ).join('') || '<p style="color:var(--sub);font-size:.85rem">Belum ada posisi aktif.</p>';
 
   document.getElementById('detail-content').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;flex-wrap:wrap;gap:.5rem">
@@ -631,32 +624,33 @@ async function loadPortfolio() {
     <div class="detail-grid">
       <div class="di">
         <div class="dk">Kas Tersedia</div>
-        <div class="dv" style="color:#a78bfa" id="cash-display">Rp ${fmtB(data.cash_balance_idr)}</div>
+        <div class="dv" style="color:#a78bfa" id="cash-display">Rp ${fmtB(cash)}</div>
         <div style="display:flex;gap:.4rem;margin-top:.6rem;align-items:center">
           <input id="cash-input" type="number" placeholder="Nominal baru (Rp)"
             style="background:#0f172a;border:1px solid var(--border);color:var(--text);padding:.3rem .5rem;border-radius:4px;font-size:.78rem;width:160px"
-            value="${Math.round(data.cash_balance_idr)}" />
+            value="${Math.round(cash)}" />
           <button onclick="updateCash()" style="padding:.3rem .7rem;background:#7c3aed;color:#fff;border:none;border-radius:4px;font-size:.78rem;cursor:pointer">Simpan</button>
         </div>
       </div>
-      <div class="di"><div class="dk">Total Order Eksekusi</div><div class="dv">${data.total_orders_executed}</div></div>
-    </div>
-    <div class="detail-grid">${holdings}</div>`;
+    </div>`;
 }
 
-async function updateCash() {
+function updateCash() {
   const val = parseFloat(document.getElementById('cash-input').value);
   if (isNaN(val) || val < 0) return alert('Masukkan nominal yang valid');
-  const res = await fetch(`/api/portfolio/cash?amount=${val}`, { method: 'POST' });
-  const data = await res.json();
-  document.getElementById('cash-display').textContent = 'Rp ' + fmtB(data.cash_balance_idr);
-  document.getElementById('s-cash').textContent = 'Rp ' + fmtB(data.cash_balance_idr);
+  setLocalCash(val);
+  
+  document.getElementById('cash-display').textContent = 'Rp ' + fmtB(val);
+  const sCash = document.getElementById('s-cash');
+  if (sCash) sCash.textContent = 'Rp ' + fmtB(val);
+  
   const btn = document.querySelector('[onclick="updateCash()"]');
   const orig = btn.textContent;
   btn.textContent = '✓ Tersimpan';
   btn.style.background = '#16a34a';
   setTimeout(() => { btn.textContent = orig; btn.style.background = '#7c3aed'; }, 1500);
 }
+
 
 function updateStats(results) {
   document.getElementById('s-total').textContent = results.length;
@@ -677,6 +671,18 @@ function updateWatchlistBadge() {
   if (wlEl) wlEl.textContent = savedWatchlist.length;
 }
 
+function getLocalCash() { return parseFloat(localStorage.getItem('idx_cash')) || 100000000; }
+function setLocalCash(v) { localStorage.setItem('idx_cash', v); }
+
+function loadLocalWatchlist() {
+  try { return JSON.parse(localStorage.getItem('idx_watchlist') || '[]'); }
+  catch { return []; }
+}
+function saveLocalWatchlist(wl) { localStorage.setItem('idx_watchlist', JSON.stringify(wl)); }
+
+// Initialize
+let savedWatchlist = loadLocalWatchlist();
+
 function renderWatchlistChips() {
   const el = document.getElementById('wl-chips');
   if (!el) return;
@@ -694,27 +700,25 @@ function toggleWatchlist() {
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
 }
 
-async function toggleStar(ticker, company_name) {
+function toggleStar(ticker, company_name) {
   const inWl = savedWatchlist.some(w => w.ticker === ticker);
   if (inWl) {
-    await fetch(`/api/watchlist/${ticker}`, { method: 'DELETE' });
     savedWatchlist = savedWatchlist.filter(w => w.ticker !== ticker);
   } else {
-    const res = await fetch(`/api/watchlist/${ticker}?company_name=${encodeURIComponent(company_name)}`, { method: 'POST' });
-    savedWatchlist = await res.json();
+    savedWatchlist.push({ticker, company_name});
   }
+  saveLocalWatchlist(savedWatchlist);
+  
   renderWatchlistChips();
   updateWatchlistBadge();
-  // Refresh star state in current detail panel if open
   if (window._currentDetailTicker === ticker) {
     const btn = document.getElementById('detail-star-btn');
     if (btn) { btn.classList.toggle('saved', !inWl); btn.title = inWl ? 'Simpan ke Watchlist' : 'Hapus dari Watchlist'; }
   }
-  // Re-render table stars without a full re-render
   if (allResults.length) renderTable(window._results || allResults, false);
 }
 
-async function removeStar(ticker) { await toggleStar(ticker, ''); }
+function removeStar(ticker) { toggleStar(ticker, ''); }
 
 async function scanOneWl(ticker) {
   document.getElementById('wl-panel').style.display = 'none';
@@ -727,9 +731,9 @@ async function scanWatchlist() {
   setSpinner(true, 'Scan Watchlist...');
   document.getElementById('wl-panel').style.display = 'none';
   try {
-    const cash = (await fetch('/api/portfolio').then(r=>r.json())).cash_balance_idr || 1e8;
+    const cash = getLocalCash();
     const fetchOne = async t => {
-      const r = await fetch(`/api/scan?ticker=${t}`);
+      const r = await fetch(`/api/scan?ticker=${t}&cash=${cash}`);
       return r.ok ? r.json() : null;
     };
     const res = await Promise.all(savedWatchlist.map(w => fetchOne(w.ticker)));
@@ -780,8 +784,7 @@ async function showAutoPlan() {
   document.getElementById('rekomendasi-content').innerHTML = '<div class="spinner active" style="margin:1rem 0;justify-content:flex-start"><div class="spin"></div><span>Menyusun portofolio...</span></div>';
   pnl.scrollIntoView({behavior:'smooth',block:'start'});
   
-  const d = await fetch('/api/portfolio').then(r=>r.json());
-  let cash = d.cash_balance_idr;
+  let cash = getLocalCash();
   
   const buys = allResults.filter(r => r.action === 'BUY')
     .sort((a,b) => b.fundamental_score - a.fundamental_score || b.confidence_score - a.confidence_score)
@@ -860,7 +863,7 @@ async def root():
 
 
 @app.get("/api/scan-all")
-async def scan_all(type: str = "lq45"):
+async def scan_all(type: str = "lq45", cash: float = 100000000.0):
     if type == "gems":
         # Dynamic: fresh random sample from live IDX securities list every call
         watchlist = get_dynamic_gems(exclude=IDX_WATCHLIST, n=25)
@@ -872,7 +875,6 @@ async def scan_all(type: str = "lq45"):
         watchlist = IDX_WATCHLIST
         is_gem = False
 
-    cash = bot.paper_broker.get_portfolio_status().get("cash_balance_idr", 100_000_000.0)
     loop = asyncio.get_event_loop()
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = [loop.run_in_executor(pool, _scan_one, t, cash, is_gem) for t in watchlist]
@@ -888,9 +890,8 @@ async def gems_status():
 
 
 @app.get("/api/scan")
-async def scan_stock(ticker: str = Query(...)):
+async def scan_stock(ticker: str = Query(...), cash: float = 100000000.0):
     try:
-        cash = bot.paper_broker.get_portfolio_status().get("cash_balance_idr", 100_000_000.0)
         profile = fetch_live_profile(ticker, available_cash=cash)
         result = bot.process_stock(profile)
         result["company_name"] = profile.company_name
