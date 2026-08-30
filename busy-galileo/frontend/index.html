@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Trading GUI (Canvas)</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.development.js"></script>
+    <style>
+        body { margin: 0; background-color: #0a0a0a; color: #e0e0e0; font-family: system-ui; }
+        #root { padding: 16px; }
+        .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; height: 90vh; }
+        .card { background-color: #171717; border: 1px solid #262626; border-radius: 6px; padding: 20px; display: flex; flex-direction: column; }
+        .price { font-size: 3rem; font-weight: 800; font-family: monospace; }
+        #chart { flex-grow: 1; margin-top: 10px; width: 100%; height: 400px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useEffect, useRef, useState } = React;
+        
+        // Global to track ticks received
+        window.totalTicks = 0;
+
+        function App() {
+            const priceRef = useRef(null);
+            const chartContainerRef = useRef(null);
+            const chartRef = useRef(null);
+            const candleSeriesRef = useRef(null);
+            const [tickCounter, setTickCounter] = useState(0);
+
+            useEffect(() => {
+                // Interval to update tick counter state (so React only renders this small part 1/sec)
+                const interval = setInterval(() => {
+                    setTickCounter(window.totalTicks);
+                }, 1000);
+                return () => clearInterval(interval);
+            }, []);
+
+            useEffect(() => {
+                if (!chartContainerRef.current) return;
+
+                // Create Lightweight Chart Canvas Engine
+                const chart = LightweightCharts.createChart(chartContainerRef.current, {
+                    layout: { background: { type: 'solid', color: '#171717' }, textColor: '#d1d4dc' },
+                    grid: { vertLines: { color: '#2b2b43' }, horzLines: { color: '#2b2b43' } },
+                    width: chartContainerRef.current.clientWidth,
+                    height: chartContainerRef.current.clientHeight || 400,
+                    timeScale: { timeVisible: true, secondsVisible: true }
+                });
+                
+                // Add Candlestick Series
+                const candleSeries = chart.addCandlestickSeries({
+                    upColor: '#00ff88', downColor: '#ff3366', borderVisible: false,
+                    wickUpColor: '#00ff88', wickDownColor: '#ff3366'
+                });
+                
+                chartRef.current = chart;
+                candleSeriesRef.current = candleSeries;
+
+                const handleResize = () => chart.applyOptions({ 
+                    width: chartContainerRef.current.clientWidth,
+                    height: chartContainerRef.current.clientHeight
+                });
+                window.addEventListener('resize', handleResize);
+
+                // WebSocket Connection
+                const ws = new WebSocket('ws://127.0.0.1:8001/ws');
+                let lastPrice = 0;
+                
+                // Keep track of current candle for the minute/second aggregation
+                let currentCandle = null;
+
+                ws.onmessage = (event) => {
+                    const batch = JSON.parse(event.data);
+                    if (batch.length === 0) return;
+                    
+                    window.totalTicks += batch.length;
+                    
+                    const latestTick = batch[batch.length - 1];
+                    const currentPrice = latestTick.price;
+                    
+                    // Native DOM update for price text
+                    if (priceRef.current) {
+                        priceRef.current.innerText = `$${currentPrice.toFixed(2)}`;
+                        priceRef.current.style.color = currentPrice > lastPrice ? '#00ff88' : '#ff3366';
+                    }
+                    lastPrice = currentPrice;
+
+                    // Aggregate ticks into 1-second candles for lightweight charts 
+                    // (rendering 1000 candles per second is useless visually)
+                    const tickTime = Math.floor(latestTick.timestamp);
+                    
+                    if (!currentCandle || currentCandle.time !== tickTime) {
+                        currentCandle = {
+                            time: tickTime,
+                            open: currentPrice,
+                            high: currentPrice,
+                            low: currentPrice,
+                            close: currentPrice
+                        };
+                    } else {
+                        currentCandle.high = Math.max(currentCandle.high, currentPrice);
+                        currentCandle.low = Math.min(currentCandle.low, currentPrice);
+                        currentCandle.close = currentPrice;
+                    }
+                    
+                    // Update chart efficiently
+                    candleSeries.update(currentCandle);
+                };
+
+                return () => {
+                    ws.close();
+                    window.removeEventListener('resize', handleResize);
+                    chart.remove();
+                };
+            }, []);
+
+            return (
+                <div className="grid">
+                    <div className="card">
+                        <h2>NVDA - Realtime Canvas Charting</h2>
+                        <div ref={priceRef} className="price">Loading...</div>
+                        <div id="chart" ref={chartContainerRef}></div>
+                    </div>
+                    <div className="card">
+                        <h2>Metrics & Profile</h2>
+                        <p>Total Ticks Received: <strong>{tickCounter}</strong></p>
+                        <p>Status: <span style={{color: '#00ff88'}}>Connected</span></p>
+                        <p>Engine: HTML5 Canvas (Lightweight Charts)</p>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
